@@ -138,7 +138,6 @@ static const dvd_key_t player_keys[] = {
                 }
             }
 
-
             /*  If the drive has given us an encrypted disc key, then we'll 
              *  start by executing all of our player keys against it in 
              *  parallel.
@@ -826,8 +825,8 @@ void reportPhysicalFormatInfo(int fd, int *numberOfLayers, off_t* blockCount)
     if (0 != ioctl(fd, DKIOCDVDREADSTRUCTURE, &dvd)) {
         [NSException raise:UDFReaderErrorException format:@"reportPhysicalFormatInfo: %s", strerror(errno)]; 
     }
-    daddr_t bc;
-    if (0 != ioctl(fd, DKIOCGETBLOCKCOUNT, &bc)) {
+    off_t bc = 0;
+    if (0 != ioctl(fd, DKIOCGETBLOCKCOUNT, &bc) || bc == 0) {
         [NSException raise:UDFReaderErrorException format:@"reportPhysicalFormatInfo: %s", strerror(errno)]; 
     }
     *numberOfLayers = dvdbs.numberOfLayers;
