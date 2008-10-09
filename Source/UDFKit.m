@@ -149,7 +149,6 @@ static const dvd_key_t player_keys[] = {
                 }
             }
             
-
             /*  Attempt to read in the Anchor Volume Descriptor Pointer (ADVP) from
              *  a standard location (sector 256), and failing that, at a backup 
              *  location.  If we succeed, we'll learn the location of the Main 
