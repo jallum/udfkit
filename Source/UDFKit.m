@@ -271,6 +271,7 @@ static const dvd_key_t player_keys[] = {
 - (void) dealloc
 {
     [self close];
+    [pathToDevice release];
     [lockPicks release];
     [cache release];
     [titleKeysByPath release];
