@@ -59,6 +59,7 @@
 - (NSData*) readLogicalSectorAt:(off_t)offset error:(NSError**)error;
 - (NSData*) readLogicalSectors:(uint32_t)count at:(off_t)offset error:(NSError**)error;
 - (NSData*) determineTitleKeyForLogicalOffset:(off_t)offset;
+- (NSData*) determineTitleKeyForLogicalOffset:(off_t)offset usingData:(NSData*)data;
 - (void) lockPickOperation:(UDFLockPickOperation*)lpi foundKey:(NSData*)key;
 @end
 
@@ -82,6 +83,7 @@ static void determineBusKey(int fd, int agid, uint8_t* busKey);
 
 #define DVD_KEY_SIZE        5
 #define DVD_CHALLENGE_SIZE  DVD_KEY_SIZE * 2
+#define DVD_BLOCK_SIZE      2048
 #define DVD_DISCKEY_SIZE    2048
 
 typedef uint8_t dvd_key_t[DVD_KEY_SIZE];
@@ -94,4 +96,6 @@ extern void CSS_busKey(int variant, const dvd_challenge_t challenge, dvd_key_t k
 
 extern void CSS_decryptBlock(const dvd_key_t key, uint8_t *sector);
 extern void CSS_decryptKey(uint8_t invert, const dvd_key_t key, const dvd_key_t encryptedKey, dvd_key_t decryptedKey);
+
+extern BOOL CSS_exploitPattern(uint8_t const p_sec[ DVD_BLOCK_SIZE ], int i_pos, uint8_t *p_key);
 

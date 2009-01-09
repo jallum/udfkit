@@ -207,7 +207,7 @@ void CSS_decryptKey(uint8_t invert, const dvd_key_t key, const dvd_key_t encrypt
         t1 = ((t1 & 1) << 8) ^ t5;
         t5 = CSStab4[t5];
         
-        uint8_t t6 = (((((((t3 >> 8) ^ t3) >> 1) ^ t3 ) >> 3) ^ t3) >> 7);
+        uint8_t t6 = (((((((t3 >> 8) ^ t3) >> 1) ^ t3) >> 3) ^ t3) >> 7);
         t3 = (t3 >> 8) | (t6 << 24);
         
         t4 += (t6 ^ invert) + t5;
@@ -229,6 +229,153 @@ void CSS_decryptKey(uint8_t invert, const dvd_key_t key, const dvd_key_t encrypt
     
     return;
 }
+
+
+#pragma mark -
+
+static int CSS_recoverTitleKey(int i_start, uint8_t const *p_crypted,
+                           uint8_t const *p_decrypted,
+                           uint8_t const *p_sector_seed, uint8_t *p_key)
+{
+    uint8_t p_buffer[10];
+    uint32_t i_t1, i_t2, i_t3, i_t4, i_t5, i_t6;
+    unsigned int i_candidate;
+    int i_exit = -1;
+    
+    for (int i = 0 ; i < 10 ; i++) {
+        p_buffer[i] = CSStab1[p_crypted[i]] ^ p_decrypted[i];
+    }
+    
+    for (int i_try = i_start ; i_try < 0x10000 ; i_try++) {
+        i_t1 = i_try >> 8 | 0x100;
+        i_t2 = i_try & 0xff;
+        i_t3 = 0;               /* not needed */
+        i_t5 = 0;
+        
+        int i = 0;
+        
+        /* iterate cipher 4 times to reconstruct LFSR2 */
+        for (; i < 4 ; i++) {
+            /* advance LFSR1 normaly */
+            i_t4 = CSStab2[i_t2] ^ CSStab3[i_t1];
+            i_t2 = i_t1 >> 1;
+            i_t1 = ((i_t1 & 1) << 8) ^ i_t4;
+            i_t4 = CSStab5[i_t4];
+            /* deduce i_t6 & i_t5 */
+            i_t6 = p_buffer[i];
+            if (i_t5) {
+                i_t6 = (i_t6 + 0xff) & 0x0ff;
+            }
+            if (i_t6 < i_t4) {
+                i_t6 += 0x100;
+            }
+            i_t6 -= i_t4;
+            i_t5 += i_t6 + i_t4;
+            i_t6 = CSStab4[ i_t6 ];
+            /* feed / advance i_t3 / i_t5 */
+            i_t3 = (i_t3 << 8) | i_t6;
+            i_t5 >>= 8;
+        }
+        
+        i_candidate = i_t3;
+        
+        /* iterate 6 more times to validate candidate key */
+        for (; i < 10 ; i++) {
+            i_t4 = CSStab2[i_t2] ^ CSStab3[i_t1];
+            i_t2 = i_t1 >> 1;
+            i_t1 = ((i_t1 & 1) << 8) ^ i_t4;
+            i_t4 = CSStab5[i_t4];
+            i_t6 = (((((((i_t3 >> 3) ^ i_t3) >> 1) ^
+                       i_t3) >> 8) ^ i_t3) >> 5) & 0xff;
+            i_t3 = (i_t3 << 8) | i_t6;
+            i_t6 = CSStab4[i_t6];
+            i_t5 += i_t6 + i_t4;
+            if ((i_t5 & 0xff) != p_buffer[i])
+            {
+                break;
+            }
+            
+            i_t5 >>= 8;
+        }
+        
+        if (i == 10) {
+            /* Do 4 backwards steps of iterating t3 to deduce initial state */
+            i_t3 = i_candidate;
+            for (int i = 0 ; i < 4 ; i++) {
+                i_t1 = i_t3 & 0xff;
+                i_t3 = (i_t3 >> 8);
+                /* easy to code, and fast enough bruteforce
+                 * search for byte shifted in */
+                for (int j = 0 ; j < 256 ; j++) {
+                    i_t3 = (i_t3 & 0x1ffff) | (j << 17);
+                    i_t6 = (((((((i_t3 >> 3) ^ i_t3) >> 1) ^
+                               i_t3) >> 8) ^ i_t3) >> 5) & 0xff;
+                    if (i_t6 == i_t1) {
+                        break;
+                    }
+                }
+            }
+            
+            i_t4 = (i_t3 >> 1) - 4;
+            for (int i_t5 = 0 ; i_t5 < 8; i_t5++) {
+                if (((i_t4 + i_t5) * 2 + 8 - ((i_t4 + i_t5) & 7))== i_t3) {
+                    p_key[0] = i_try >> 8;
+                    p_key[1] = i_try & 0xFF;
+                    p_key[2] = ((i_t4 + i_t5) >> 0) & 0xFF;
+                    p_key[3] = ((i_t4 + i_t5) >> 8) & 0xFF;
+                    p_key[4] = ((i_t4 + i_t5) >> 16) & 0xFF;
+                    i_exit = i_try + 1;
+                }
+            }
+        }
+    }
+    
+    if (i_exit >= 0) {
+        p_key[0] ^= p_sector_seed[0];
+        p_key[1] ^= p_sector_seed[1];
+        p_key[2] ^= p_sector_seed[2];
+        p_key[3] ^= p_sector_seed[3];
+        p_key[4] ^= p_sector_seed[4];
+    }
+    
+    return i_exit;
+}
+
+BOOL CSS_exploitPattern(uint8_t const p_sec[ DVD_BLOCK_SIZE ], int i_pos, uint8_t *p_key)
+{
+    int i_best_plen = 0;
+    int i_best_p = 0;
+    
+    /* For all cycle length from 2 to 48 */
+    for (int i = 2 ; i < 0x30 ; i++) {
+        /* Find the number of bytes that repeats in cycles. */
+        for (int j = i + 1; j < 0x80 && ( p_sec[0x7F - (j%i)] == p_sec[0x7F - j] ); j++) {
+            /* We have found j repeating bytes with a cycle length i. */
+            if (j > i_best_plen) {
+                i_best_plen = j;
+                i_best_p = i;
+            }
+        }
+    }
+    
+    /* We need at most 10 plain text bytes?, so a make sure that we
+     * have at least 20 repeated bytes and that they have cycled at
+     * least one time.  */
+    if ((i_best_plen > 3) && (i_best_plen / i_best_p >= 2)) {
+        bzero(p_key, DVD_KEY_SIZE);
+        int res = CSS_recoverTitleKey( 
+            0,  
+            &p_sec[0x80],
+            &p_sec[ 0x80 - (i_best_plen / i_best_p) * i_best_p ],
+            &p_sec[0x54] /* key_seed */, 
+            p_key 
+        );
+        return (res >= 0);
+    }
+    
+    return 0;
+}
+
 
 
 #pragma mark -
@@ -349,7 +496,7 @@ static void CSS_engine(int variant, uint8_t const* input, uint8_t* output)
 }
 
 
-/****************************************************************************/
+#pragma mark -
 
 static uint8_t CSSvariants[] = {
     0xB7, 0x74, 0x85, 0xD0, 0xCC, 0xDB, 0xCA, 0x73,

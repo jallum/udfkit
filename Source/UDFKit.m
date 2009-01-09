@@ -581,7 +581,23 @@ static const dvd_key_t player_keys[] = {
         } while (--tries > 0 && !authenticated);
         
         if (tries == 0 || !authenticated) {
-            [NSException raise:UDFReaderAuthenticationException format:@"Unable to authenticate drive."];
+            dvd_key_t busKey;
+            dvd_disckey_t encryptedDiscKeyBytes;
+            BOOL authenticated = NO;
+            int agid = 0;
+            for (int i = 0; !authenticated && i < 10; i++) {
+                @try {
+                    agid = reportAGID(fileDescriptor, i);
+                    determineBusKey(fileDescriptor, agid, busKey);
+                    readDiscKey(fileDescriptor, agid, encryptedDiscKeyBytes);
+                    if (1 == reportAuthStatusFlag(fileDescriptor, i)) {
+                        authenticated = YES;
+                    }
+                } @catch (id exception) {
+                    invalidateAGID(fileDescriptor, i);
+                }
+            }
+            return nil;
         }
         
         /*  Mash up the encrypted title-key with the bus-key.  
@@ -604,6 +620,20 @@ static const dvd_key_t player_keys[] = {
         }
     }
     return key;
+}
+
+- (NSData*) determineTitleKeyForLogicalOffset:(off_t)offset usingData:(NSData*)data
+{
+    const uint8_t* bytes = [data bytes];
+    for (const uint8_t* p = bytes, *pl = p + [data length]; p < pl; p += 2048) {
+        if (p[0x14] & 0x30) {
+            dvd_key_t encryptedTitleKey;
+            if (CSS_exploitPattern(p, offset, encryptedTitleKey)) {
+                return [NSData dataWithBytes:encryptedTitleKey length:sizeof(encryptedTitleKey)];
+            }
+        }
+    }
+    return nil;
 }
 
 - (void) lockPickOperation:(UDFLockPickOperation*)lpi foundKey:(NSData*)key
@@ -687,10 +717,11 @@ static const dvd_key_t player_keys[] = {
     NSMutableData* data = nil;
     uint32_t offset;
     off_t firstSector;
+    uint32_t sectors;
+    NSError* error = nil;
     @synchronized (extent) {
-        NSError* error;
         offset = position & 0x7FF;
-        uint32_t sectors = ((offset + length) >> 11) + (((offset + length) & 0x7FF) > 0);
+        sectors = ((offset + length) >> 11) + (((offset + length) & 0x7FF) > 0);
         firstSector = [extent offset] + (position >> 11);
         data = (NSMutableData*)[reader readLogicalSectors:sectors at:firstSector error:&error];
         if (error) {
@@ -700,17 +731,42 @@ static const dvd_key_t player_keys[] = {
         }
     }
     if (data && (titleKey || scanForEncryption)) {
-        if (!firstSector) {
-            titleKey = [[reader determineTitleKeyForLogicalOffset:[extent offset]] retain];
-        }
         uint8_t* const bytes = [data mutableBytes];
-        for (uint8_t* p = bytes, *pl = p + [data length]; p < pl; p += 2048) {
-            if ((p[0x14] & 0x30) && !titleKey) {
-                titleKey = [[reader determineTitleKeyForLogicalOffset:firstSector + ((p - bytes) >> 11)] retain];
+        BOOL hitEncryptedData = NO;
+        for (uint8_t* p = bytes, *pl = p + [data length]; !titleKey && p < pl; p += 2048) {
+            if (p[0x14] & 0x30) {
+                hitEncryptedData = YES;
+                uint32_t logicalOffset = firstSector + ((p - bytes) >> 11);
+                if (nil == (titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset usingData:data])) {
+                    if (nil == (titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset])) {
+                        uint32_t limit = ([extent lengthInBytes] - position) >> 11;
+                        firstSector += sectors;
+                        while (limit > 0 && !titleKey && !error) {
+                            if (sectors > limit) {
+                                sectors = limit;
+                            }
+                            
+                            NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+                            NSData* moreData = [[reader readLogicalSectors:sectors at:firstSector error:&error] retain];
+                            [pool release];
+
+                            if (!error) {
+                                titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset usingData:moreData];
+                                [moreData release];
+                            }
+
+                            firstSector += sectors;
+                            limit -= sectors;
+                        }
+                    }
+                }
             }
         }
         if (titleKey) {
             data = [UDFSelfDecryptingData dataWithMutableData:data titleKey:titleKey];
+            [titleKey retain];
+        } else if (hitEncryptedData) {
+            [NSException raise:UDFReaderAuthenticationException format:@"Unable to authenticate drive."];
         }
     }
     return (offset == 0 && length == [data length]) ? data : [data subdataWithRange:NSMakeRange(offset, length)];
@@ -736,17 +792,20 @@ static const dvd_key_t player_keys[] = {
         position += length;
     }
     if (data && (titleKey || scanForEncryption)) {
-        if (!firstSector) {
-            titleKey = [[reader determineTitleKeyForLogicalOffset:[extent offset]] retain];
-        }
         uint8_t* const bytes = [data mutableBytes];
-        for (uint8_t* p = bytes, *pl = p + [data length]; p < pl; p += 2048) {
+        for (uint8_t* p = bytes, *pl = p + [data length]; !titleKey && p < pl; p += 2048) {
             if ((p[0x14] & 0x30) && !titleKey) {
-                titleKey = [[reader determineTitleKeyForLogicalOffset:firstSector + ((p - bytes) >> 11)] retain];
+                if (nil == (titleKey = [reader determineTitleKeyForLogicalOffset:firstSector + ((p - bytes) >> 11) usingData:data])) {
+                    titleKey = [reader determineTitleKeyForLogicalOffset:firstSector + ((p - bytes) >> 11)];
+                    break;
+                }
             }
         }
         if (titleKey) {
             data = [UDFSelfDecryptingData dataWithMutableData:data titleKey:titleKey];
+            [titleKey retain];
+        } else {
+            [NSException raise:UDFReaderAuthenticationException format:@"Unable to authenticate drive."];
         }
     }
     return (offset == 0 && length == [data length]) ? data : [data subdataWithRange:NSMakeRange(offset, length)];
