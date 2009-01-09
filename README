@@ -8,8 +8,8 @@ Macintosh, and is now available to the public.
 DVD discs are formatted as UDF filesystems.  UDFKit was designed to make it
 easy to read files directly from a disc (or disc image.)
 
-As part of RipIt, UDFKit has been extensively tested against more than 10,000
-different discs, with compatibility in excess of 99.6%.
+As part of RipIt, UDFKit has been extensively tested against more than 40,000
+different discs, with compatibility in excess of 99.996%.
 
 
 LEGAL
