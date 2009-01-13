@@ -103,6 +103,11 @@
     return bytes;
 }
 
+- (const void*) rawBytes
+{
+    return [data bytes];
+}
+
 @end
 
 static uint8_t CSSsecret[];

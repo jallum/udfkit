@@ -37,6 +37,7 @@
 }
 + (id) dataWithMutableData:(NSMutableData*)data titleKey:(NSData*)titleKey;
 - (id) initWithMutableData:(NSMutableData*)data titleKey:(NSData*)titleKey;
+- (const void*) rawBytes;
 @end
 
 @interface UDFDiscExtent : NSObject {
