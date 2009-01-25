@@ -7,6 +7,7 @@
 #define NSLog(...)
 #endif
 
+
 NSString* const UDFReaderErrorException = @"UDFReaderErrorException";
 NSString* const UDFReaderAuthenticationException = @"UDFReaderAuthenticationException";
 
@@ -522,22 +523,27 @@ static const dvd_key_t player_keys[] = {
 
 - (NSData*) readRawSectors:(uint32_t)count at:(off_t)offset error:(NSError**)error
 {
-    NSMutableData* data = [[NSMutableData alloc] initWithLength:0x0800 * count];
+    uint32_t length = 0x0800 * count;
+    uint8_t* bytes = malloc(length);
+    if (!bytes) {
+        return nil;
+    }
     NSError* errorToReturn = nil;
     off_t offsetInBytes = ((off_t)offset) << 11;
-    int result = pread(fileDescriptor, [data mutableBytes], [data length], offsetInBytes);
-    if (result != [data length]) {
+    int result = pread(fileDescriptor, bytes, length, offsetInBytes);
+    if (result != length) {
         errorToReturn = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil];
         perror(NULL);
-    }
-    if (errorToReturn) {
-        [data release];
-        data = nil;
     }
     if (error) {
         *error = errorToReturn;
     }
-    return [data autorelease];
+    if (errorToReturn) {
+        free(bytes);
+        return nil;
+    } else {
+        return [NSMutableData dataWithBytesNoCopy:bytes length:length];
+    }
 }
 
 - (NSData*) readLogicalSectorAt:(off_t)offset error:(NSError**)error
