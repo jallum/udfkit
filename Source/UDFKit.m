@@ -849,6 +849,11 @@ static const dvd_key_t player_keys[] = {
     return [[[UDFDiscInformationControlBlock alloc] initWithOffset:_offset length:_length isFolder:_isFolder version:_version] autorelease];
 }
 
+- (void) dealloc
+{
+    [super dealloc];
+}
+
 @end
 
 
