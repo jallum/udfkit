@@ -27,8 +27,8 @@
 
 - (void) dealloc
 {
-    [discKey release];
-    [playerKey release];
+    [discKey release], discKey = nil;
+    [playerKey release], playerKey = nil;
     [super dealloc];
 }
 
@@ -72,8 +72,8 @@
 
 - (void) dealloc
 {
-    [titleKey release];
-    [data release];
+    [titleKey release], titleKey = nil;
+    [data release], data = nil;
     [super dealloc];
 }
 
@@ -95,8 +95,7 @@
                         p[0x14] &= ~0x30;
                     }
                 }
-                [titleKey release];
-                titleKey = nil;
+                [titleKey release], titleKey = nil;
             }
         }
     }
@@ -169,7 +168,21 @@ void CSS_busKey(int variant, const dvd_challenge_t challenge, dvd_key_t key)
     CSS_engine(perm_variant[variant], scratch, key);
 }
 
-void CSS_decryptBlock(const dvd_key_t key, uint8_t* sector)
+void CSS_decryptBlock(const dvd_key_t x, uint8_t* s)
+{
+#define m(i)(x[i]^s[i+84])<<
+    uint n = 0x800;
+    uint8_t y = s[13] % 8 + 20;
+    if (s[y] / 16 % 4 == 1) {
+        int i = m(1)17^256+m(0)8, k = m(2)0, j = m(4)17^m(3)9^k*2-k%8^8, a = 0, c = 26;
+        for (s[y] -= 16; --c; j *= 2)
+            a = a*2^i&1, i = i/2^j&1<<24;
+        for(j = 127; ++j < n; c = c > y)
+            c += y = i^i/8^i>>4^i>>12, i = i>>8^y<<17, a ^= a>>14, y = a^a*8^a<<6, a = a>>8^y<<9, k = s[j], k = "7Wo~'G_\216"[k&7]+2^"cr3sfw6v;*k+>/n."[k>>4]*2^k*257/8, s[j] = k^(k&k*2&34)*6^c+~y;
+    }
+}
+
+void CSS_decryptBlock2(const dvd_key_t key, uint8_t* sector)
 {
 	uint32_t t1, t2, t3, t4, t5, t6;
 	uint8_t* end = sector + 0x800;
@@ -242,11 +255,11 @@ static int CSS_recoverTitleKey(int i_start, uint8_t const *p_crypted,
                            uint8_t const *p_decrypted,
                            uint8_t const *p_sector_seed, uint8_t *p_key)
 {
-    uint8_t p_buffer[10];
     uint32_t i_t1, i_t2, i_t3, i_t4, i_t5, i_t6;
-    unsigned int i_candidate;
+    uint32_t i_candidate;
     int i_exit = -1;
     
+    uint8_t p_buffer[10];
     for (int i = 0 ; i < 10 ; i++) {
         p_buffer[i] = CSStab1[p_crypted[i]] ^ p_decrypted[i];
     }
@@ -346,41 +359,42 @@ static int CSS_recoverTitleKey(int i_start, uint8_t const *p_crypted,
     return i_exit;
 }
 
-BOOL CSS_exploitPattern(uint8_t const p_sec[ DVD_BLOCK_SIZE ], int i_pos, uint8_t *p_key)
+BOOL CSS_exploitPattern(uint8_t const p_sec[ DVD_BLOCK_SIZE ], uint8_t *p_key)
 {
     int i_best_plen = 0;
     int i_best_p = 0;
     
-    /* For all cycle length from 2 to 48 */
+    /*  For all cycle length from 2 to 48 
+     */
     for (int i = 2 ; i < 0x30 ; i++) {
-        /* Find the number of bytes that repeats in cycles. */
-        for (int j = i + 1; j < 0x80 && ( p_sec[0x7F - (j%i)] == p_sec[0x7F - j] ); j++) {
-            /* We have found j repeating bytes with a cycle length i. */
-            if (j > i_best_plen) {
+        /*  Find the number of bytes that repeats in cycles. 
+         */
+        for (int j = i + 1; j < 0x80 && (p_sec[0x7F - (j%i)] == p_sec[0x7F - j]); j++) {
+            /*  We have found j repeating bytes with a cycle length i. 
+             */
+            if ((j > i_best_plen) && (j > i)) {
+
                 i_best_plen = j;
                 i_best_p = i;
+
+                if ((i_best_plen > 3) && ((i_best_plen / i_best_p) >= 2)) {
+                    bzero(p_key, DVD_KEY_SIZE);
+                    if (0 <= CSS_recoverTitleKey( 
+                        0,  
+                        &p_sec[0x80],
+                        &p_sec[0x80 - (i_best_plen / i_best_p) * i_best_p],
+                        &p_sec[0x54] /* key_seed */, 
+                        p_key 
+                    )) {
+                        return 1;
+                    };
+                }
             }
         }
     }
     
-    /* We need at most 10 plain text bytes?, so a make sure that we
-     * have at least 20 repeated bytes and that they have cycled at
-     * least one time.  */
-    if ((i_best_plen > 3) && (i_best_plen / i_best_p >= 2)) {
-        bzero(p_key, DVD_KEY_SIZE);
-        int res = CSS_recoverTitleKey( 
-            0,  
-            &p_sec[0x80],
-            &p_sec[ 0x80 - (i_best_plen / i_best_p) * i_best_p ],
-            &p_sec[0x54] /* key_seed */, 
-            p_key 
-        );
-        return (res >= 0);
-    }
-    
     return 0;
 }
-
 
 
 #pragma mark -

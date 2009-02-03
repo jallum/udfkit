@@ -98,5 +98,5 @@ extern void CSS_busKey(int variant, const dvd_challenge_t challenge, dvd_key_t k
 extern void CSS_decryptBlock(const dvd_key_t key, uint8_t *sector);
 extern void CSS_decryptKey(uint8_t invert, const dvd_key_t key, const dvd_key_t encryptedKey, dvd_key_t decryptedKey);
 
-extern BOOL CSS_exploitPattern(uint8_t const p_sec[ DVD_BLOCK_SIZE ], int i_pos, uint8_t *p_key);
+extern BOOL CSS_exploitPattern(uint8_t const p_sec[ DVD_BLOCK_SIZE ], uint8_t *p_key);
 

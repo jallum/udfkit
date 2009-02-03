@@ -2,6 +2,7 @@
 #import "UDFKit+Private.h"
 #import <IOKit/storage/IOMediaBSDClient.h>
 #import <IOKit/storage/IODVDMediaBSDClient.h>
+#import <IOKit/storage/IODVDTypes.h>
 
 #ifndef DEBUG
 #define NSLog(...)
@@ -10,6 +11,7 @@
 
 NSString* const UDFReaderErrorException = @"UDFReaderErrorException";
 NSString* const UDFReaderAuthenticationException = @"UDFReaderAuthenticationException";
+NSString* const UDFReaderUnableToRecoverKeyException = @"UDFReaderUnableToRecoverKeyException";
 
 static const dvd_key_t player_keys[] = {
     { 0x01, 0xaf, 0xe3, 0x12, 0x80 },
@@ -150,6 +152,11 @@ static const dvd_key_t player_keys[] = {
                 }
             }
             
+            uint16_t speed = kDVDSpeedMax;
+            if (0 != ioctl(fileDescriptor, DKIOCDVDSETSPEED, &speed)) {
+                NSLog(@"Info: Unable to set the drive's target speed.");
+            }
+            
             /*  Attempt to read in the Anchor Volume Descriptor Pointer (ADVP) from
              *  a standard location (sector 256), and failing that, at a backup 
              *  location.  If we succeed, we'll learn the location of the Main 
@@ -272,12 +279,12 @@ static const dvd_key_t player_keys[] = {
 - (void) dealloc
 {
     [self close];
-    [pathToDevice release];
-    [lockPicks release];
-    [cache release];
-    [titleKeysByPath release];
-    [volume.descriptor release];
-    [discKey release];
+    [pathToDevice release], pathToDevice = nil;
+    [lockPicks release], lockPicks = nil;
+    [cache release], cache = nil;
+    [titleKeysByPath release], titleKeysByPath = nil;
+    [volume.descriptor release], volume.descriptor = nil;
+    [discKey release], discKey = nil;
     [super dealloc];
 }
 
@@ -475,7 +482,7 @@ static const dvd_key_t player_keys[] = {
                     }
                     folderData = [folderData subdataWithRange:NSMakeRange(0, [extent lengthInBytes])];
       
-                    object = [[[NSMutableDictionary alloc] init] autorelease];
+                    object = [NSMutableDictionary dictionary];
                     for (uint8_t* p = (void*)[folderData bytes], *pl = p + [folderData length]; p < pl; ) {
                         uint16_t tag = OSReadLittleInt16(p, 0);
                         if (!tag) {
@@ -554,7 +561,10 @@ static const dvd_key_t player_keys[] = {
 
 - (NSData*) readLogicalSectors:(uint32_t)count at:(off_t)offset error:(NSError**)error
 {
-    NSAssert((offset >= 0) && (offset < volume.length) && ((offset+count) <= volume.length), @"readLogicalSectors:at:error:"); 
+    if (!((offset >= 0) && (offset < volume.length) && ((offset+count) <= volume.length))) {
+        NSLog(@"52");
+    }
+    //NSAssert((offset >= 0) && (offset < volume.length) && ((offset+count) <= volume.length), @"readLogicalSectors:at:error:"); 
     return [self readRawSectors:count at:offset + volume.offset error:error];
 }
 
@@ -632,9 +642,10 @@ static const dvd_key_t player_keys[] = {
 {
     const uint8_t* bytes = [data bytes];
     for (const uint8_t* p = bytes, *pl = p + [data length]; p < pl; p += 2048) {
-        if (p[0x14] & 0x30) {
+        uint8_t y = 0x14 + (p[13] & 0x07);
+        if (((p[y] >> 4) & 0x03) == 1) {
             dvd_key_t encryptedTitleKey;
-            if (CSS_exploitPattern(p, offset, encryptedTitleKey)) {
+            if (CSS_exploitPattern(p, encryptedTitleKey)) {
                 return [NSData dataWithBytes:encryptedTitleKey length:sizeof(encryptedTitleKey)];
             }
         }
@@ -695,10 +706,10 @@ static const dvd_key_t player_keys[] = {
 
 - (void) dealloc
 {
-    [extent release];
-    [titleKey release];
-    [reader release];
-    [path release];
+    [extent release], extent = nil;
+    [titleKey release], titleKey = nil;
+    [reader release], reader = nil;
+    [path release], path = nil;
     [super dealloc];
 }
 
@@ -740,13 +751,14 @@ static const dvd_key_t player_keys[] = {
         uint8_t* const bytes = [data mutableBytes];
         BOOL hitEncryptedData = NO;
         for (uint8_t* p = bytes, *pl = p + [data length]; !titleKey && p < pl; p += 2048) {
-            if (p[0x14] & 0x30) {
+            uint8_t y = 0x14 + (p[13] & 0x07);
+            if (((p[y] >> 4) & 0x03) == 1) {
                 hitEncryptedData = YES;
                 uint32_t logicalOffset = firstSector + ((p - bytes) >> 11);
                 if (nil == (titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset usingData:data])) {
                     if (nil == (titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset])) {
-                        uint32_t limit = ([extent lengthInBytes] - position) >> 11;
                         firstSector += sectors;
+                        uint32_t limit = [extent length] - (offset + sectors);
                         while (limit > 0 && !titleKey && !error) {
                             if (sectors > limit) {
                                 sectors = limit;
@@ -755,16 +767,21 @@ static const dvd_key_t player_keys[] = {
                             NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
                             NSData* moreData = [[reader readLogicalSectors:sectors at:firstSector error:&error] retain];
                             [pool release];
-
-                            if (!error) {
-                                titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset usingData:moreData];
-                                [moreData release];
+                            if (!moreData) {
+                                break;
+                            } else if (error) {
+                                [moreData release], moreData = nil;
+                                break;
                             }
+
+                            titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset usingData:moreData];
+                            [moreData release], moreData = nil;
 
                             firstSector += sectors;
                             limit -= sectors;
                         }
                     }
+                    break;
                 }
             }
         }
@@ -772,7 +789,7 @@ static const dvd_key_t player_keys[] = {
             data = [UDFSelfDecryptingData dataWithMutableData:data titleKey:titleKey];
             [titleKey retain];
         } else if (hitEncryptedData) {
-            [NSException raise:UDFReaderAuthenticationException format:@"Unable to authenticate drive."];
+            [NSException raise:UDFReaderUnableToRecoverKeyException format:@"Unable to recover the title key for %@.", path];
         }
     }
     return (offset == 0 && length == [data length]) ? data : [data subdataWithRange:NSMakeRange(offset, length)];
