@@ -485,9 +485,7 @@ static const dvd_key_t player_keys[] = {
                     object = [NSMutableDictionary dictionary];
                     for (uint8_t* p = (void*)[folderData bytes], *pl = p + [folderData length]; p < pl; ) {
                         uint16_t tag = OSReadLittleInt16(p, 0);
-                        if (!tag) {
-                            break;
-                        } else if (257 == tag) {
+                        if (257 == tag) {
                             BOOL isFolder = (p[18] & 0x02) > 0;
                             uint8_t L_FI = p[19];
                             uint16_t version = OSReadLittleInt16(p, 16);
@@ -506,7 +504,7 @@ static const dvd_key_t player_keys[] = {
                             }
                             p += 4 * ((38 + L_FI + L_IU + 3) / 4);
                         } else {
-                            [NSException raise:UDFReaderErrorException format:@"Unable interpret folder data."];
+                            break;
                         }
                     }
                 } else {

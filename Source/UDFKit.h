@@ -42,11 +42,13 @@
 
 @end
 
+@class UDFDiscExtent;
+
 @interface UDFFileHandle : NSObject {
     UDFReader* reader;
     NSString* path;
     NSData* titleKey;
-    id extent;
+    UDFDiscExtent* extent;
     uint64_t position;
     BOOL scanForEncryption;
 }
