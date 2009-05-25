@@ -641,7 +641,7 @@ static const dvd_key_t player_keys[] = {
     const uint8_t* bytes = [data bytes];
     for (const uint8_t* p = bytes, *pl = p + [data length]; p < pl; p += 2048) {
         uint8_t y = 0x14 + (p[13] & 0x07);
-        if (((p[y] >> 4) & 0x03) == 1) {
+        if ((p[y] >> 4) & 0x03) {
             dvd_key_t encryptedTitleKey;
             if (CSS_exploitPattern(p, encryptedTitleKey)) {
                 return [NSData dataWithBytes:encryptedTitleKey length:sizeof(encryptedTitleKey)];
@@ -748,9 +748,9 @@ static const dvd_key_t player_keys[] = {
     if (data && (titleKey || scanForEncryption)) {
         uint8_t* const bytes = [data mutableBytes];
         BOOL hitEncryptedData = NO;
-        for (uint8_t* p = bytes, *pl = p + [data length]; !titleKey && p < pl; p += 2048) {
+        for (uint8_t* p = bytes, *pl = p + [data length]; !titleKey && (p < pl); p += 2048) {
             uint8_t y = 0x14 + (p[13] & 0x07);
-            if (((p[y] >> 4) & 0x03) == 1) {
+            if ((p[y] >> 4) & 0x03) {
                 hitEncryptedData = YES;
                 uint32_t logicalOffset = firstSector + ((p - bytes) >> 11);
                 if (nil == (titleKey = [reader determineTitleKeyForLogicalOffset:logicalOffset usingData:data])) {
@@ -784,8 +784,8 @@ static const dvd_key_t player_keys[] = {
             }
         }
         if (titleKey) {
-            data = [UDFSelfDecryptingData dataWithMutableData:data titleKey:titleKey];
             [titleKey retain];
+            data = [UDFSelfDecryptingData dataWithMutableData:data titleKey:titleKey];
         } else if (hitEncryptedData) {
             [NSException raise:UDFReaderUnableToRecoverKeyException format:@"Unable to recover the title key for %@.", path];
         }
@@ -815,7 +815,8 @@ static const dvd_key_t player_keys[] = {
     if (data && (titleKey || scanForEncryption)) {
         uint8_t* const bytes = [data mutableBytes];
         for (uint8_t* p = bytes, *pl = p + [data length]; !titleKey && p < pl; p += 2048) {
-            if ((p[0x14] & 0x30) && !titleKey) {
+            uint8_t y = 0x14 + (p[13] & 0x07);
+            if (((p[y] >> 4) & 0x03) && !titleKey) {
                 if (nil == (titleKey = [reader determineTitleKeyForLogicalOffset:firstSector + ((p - bytes) >> 11) usingData:data])) {
                     titleKey = [reader determineTitleKeyForLogicalOffset:firstSector + ((p - bytes) >> 11)];
                     break;
@@ -823,8 +824,8 @@ static const dvd_key_t player_keys[] = {
             }
         }
         if (titleKey) {
-            data = [UDFSelfDecryptingData dataWithMutableData:data titleKey:titleKey];
             [titleKey retain];
+            data = [UDFSelfDecryptingData dataWithMutableData:data titleKey:titleKey];
         } else {
             [NSException raise:UDFReaderAuthenticationException format:@"Unable to authenticate drive."];
         }

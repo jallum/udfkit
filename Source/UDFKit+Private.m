@@ -89,16 +89,23 @@
         @synchronized (data) {
             if (titleKey) {
                 const uint8_t* p_key = [titleKey bytes];
-                for (uint8_t* p = bytes, *pl = p + [data length]; p < pl; p += 2048) {
-                    if (p[0x14] & 0x30) {
+
+                uint8_t* p = bytes, * pl = bytes + [data length];
+                while (p < pl) {
+                    uint8_t y = 0x14 + (p[13] & 0x07);
+                    if (p[y] & 0x30) {
                         CSS_decryptBlock(p_key, p);
-                        p[0x14] &= ~0x30;
+                        p[y] = p[y] & ~0x30;
                     }
+                    NSAssert(0 == (p[0x14 + (p[13] & 0x07)] & 0x30), @"wtf?");
+                    p += 2048;
                 }
+
                 [titleKey release], titleKey = nil;
             }
         }
     }
+    
     return bytes;
 }
 
@@ -168,7 +175,7 @@ void CSS_busKey(int variant, const dvd_challenge_t challenge, dvd_key_t key)
     CSS_engine(perm_variant[variant], scratch, key);
 }
 
-void CSS_decryptBlock(const dvd_key_t x, uint8_t* s)
+void CSS_decryptBlock2(const dvd_key_t x, uint8_t* s)
 {
 #define m(i)(x[i]^s[i+84])<<
     uint n = 0x800;
@@ -182,7 +189,7 @@ void CSS_decryptBlock(const dvd_key_t x, uint8_t* s)
     }
 }
 
-void CSS_decryptBlock2(const dvd_key_t key, uint8_t* sector)
+void CSS_decryptBlock(const dvd_key_t key, uint8_t* sector)
 {
 	uint32_t t1, t2, t3, t4, t5, t6;
 	uint8_t* end = sector + 0x800;
