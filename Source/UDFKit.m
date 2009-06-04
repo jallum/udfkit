@@ -76,7 +76,12 @@ static const dvd_key_t player_keys[] = {
             if (fileDescriptor < 0) {
                 [NSException raise:UDFReaderErrorException format:@"%s", strerror(errno)];
             }
-
+            
+            uint16_t speed = kDVDSpeedMax;
+            if (0 != ioctl(fileDescriptor, DKIOCDVDSETSPEED, &speed)) {
+                NSLog(@"Info: Unable to set the drive's target speed.");
+            }
+			
             cache = [[NSMutableDictionary alloc] init];
             titleKeysByPath = [[NSMutableDictionary alloc] init];
 
@@ -150,11 +155,7 @@ static const dvd_key_t player_keys[] = {
                 for (int i = 0; i < sizeof(player_keys) / sizeof(dvd_key_t) && !discKey; i++) {
                     [lockPicks addOperation:[UDFLockPickOperation lockPickOperationWithDiscKey:encryptedDiscKey playerKey:[NSData dataWithBytes:player_keys[i] length:sizeof(player_keys[i])] delegate:self]];
                 }
-            }
-            
-            uint16_t speed = kDVDSpeedMax;
-            if (0 != ioctl(fileDescriptor, DKIOCDVDSETSPEED, &speed)) {
-                NSLog(@"Info: Unable to set the drive's target speed.");
+				[lockPicks waitUntilAllOperationsAreFinished];
             }
             
             /*  Attempt to read in the Anchor Volume Descriptor Pointer (ADVP) from
